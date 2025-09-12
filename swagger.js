@@ -7,7 +7,7 @@ const doc = {
     description: 'API for managing contacts information',
     version: '1.0.0'
   },
-  host: 'cse-341spring.onrender.com', // ✅ Production URL
+  host: 'https://cse-341-2-x1q3.onrender.com', // ✅ Production URL
   schemes: ['https'], // ✅ HTTPS for production
   tags: [
     {
@@ -17,9 +17,9 @@ const doc = {
   ],
   definitions: {
     Contact: {
-      firstName: 'Paul',
-      lastName: 'Lukwago',
-      email: 'paullukwago@gmail.com',
+      firstName: 'Roike',
+      lastName: 'Haringanji',
+      email: 'roikejunior07@gmail.com',
       favoriteColor: 'blue',
       birthday: '1999-01-01'
     },

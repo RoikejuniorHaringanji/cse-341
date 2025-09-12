@@ -5,7 +5,7 @@
     "description": "API for managing contacts information",
     "version": "1.0.0"
   },
-  "host": "cse-341spring.onrender.com",
+  "host": "cse-341-2-x1q3.onrender.com",
   "basePath": "/",
   "tags": [
     {
