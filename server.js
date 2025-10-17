@@ -1,116 +1,114 @@
-// server.js with Swagger integration
 require('dotenv').config();
 const express = require('express');
+const bodyParser = require('body-parser');
 const cors = require('cors');
 const swaggerUi = require('swagger-ui-express');
-const swaggerDocument = require('./swagger-output.json');
-const { connectToDatabase, getDb } = require('./db/connect');
-const contactsRoutes = require('./routes/contacts');
+const swaggerDocument = require('./swagger.json');
+const passport = require('passport');
+const session = require('express-session');
+const GitHubStrategy = require('passport-github2').Strategy; 
 
+const mongodb = require('./data/database');
 const app = express();
+const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
+// Built-in Express body parsing middleware
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Swagger API Documentation
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+// Session configuration
+app.use(bodyParser.json());
+app.use(session({
+    secret: "secret",
+    resave: false,
+    saveUninitialized: true,
+}));
+// This is the basic express session({..}) initialization.
+// app.use(passport.initialize());
+// app.use(passport.session());
+// init passport on every route call.
+app.use(passport.initialize());
+// allow passport to use "express-session".
+app.use(passport.session());
 
-// Debug route to check database connection
-app.get('/debug/db', async (req, res) => {
-  try {
-    const db = getDb();
-    const collections = await db.listCollections().toArray();
-    const contactsCollection = collections.find(c => c.name === 'contacts');
-    
-    if (!contactsCollection) {
-      return res.status(404).json({ 
-        error: 'Contacts collection not found',
-        availableCollections: collections.map(c => c.name)
-      });
-    }
-    
-    const count = await db.collection('contacts').countDocuments();
-    
-    res.json({
-      dbConnected: true,
-      dbName: db.databaseName,
-      contactsCollection: contactsCollection !== undefined,
-      contactCount: count,
-      message: count > 0 ? 'Contacts found in database' : 'Contacts collection exists but is empty'
-    });
-  } catch (error) {
-    console.error('Database debug route error:', error);
-    res.status(500).json({ 
-      dbConnected: false, 
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
-  }
+// CORS middleware  
+app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader(
+        'Access-Control-Allow-Headers', 
+        'Origin, X-Requested-With, Content-Type, Accept, Z-Key, Authorization'
+    );
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    next();
 });
 
-// Routes
-/**
- * @swagger
- * /contacts:
- *   get:
- *     tags:
- *       - Contacts
- *     description: Returns all contacts
- *     responses:
- *       200:
- *         description: Successfully returned all contacts
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 $ref: '#/definitions/ContactResponse'
- *       500:
- *         description: Server error
- */
-app.use('/contacts', contactsRoutes);
+app.use(cors({ methods: ['GET','POST','DELETE','UPDATE','PUT','PATCH']}));
+app.use(cors({ origin: '*'}));
 
-// Root route
-/**
- * @swagger
- * /:
- *   get:
- *     description: Welcome message
- *     responses:
- *       200:
- *         description: Successfully returned welcome message
- */
-app.get('/', (req, res) => {
-  res.send('Welcome to the Contacts API');
-});
-
-const port = process.env.PORT || 3000;
-
-// Start server only if not being required by another file (for testing)
-if (require.main === module) {
-  app.listen(port, async () => {
-    try {
-      console.log(`🚀 Server running on http://localhost:${port}`);
-      console.log(`📄 API Documentation available at http://localhost:${port}/api-docs`);
-      await connectToDatabase();
-      
-      // Verify the contacts collection exists and has data
-      try {
-        const db = getDb();
-        const count = await db.collection('contacts').countDocuments();
-        console.log(`✅ Found ${count} contacts in database`);
-        
-        if (count === 0) {
-          console.warn('⚠️ Warning: Contacts collection is empty');
-        }
-      } catch (dbError) {
-        console.error('❌ Error checking contacts collection:', dbError.message);
-      }
-    } catch (err) {
-      console.error('❌ Failed to initialize server:', err);
-    }
-  });
+// GitHub OAuth Strategy Configuration
+if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET || !process.env.CALLBACK_URL) {
+    console.error('Missing required environment variables: GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, or CALLBACK_URL');
+    console.log('Current env vars:', {
+        GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID ? 'SET' : 'MISSING',
+        GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET ? 'SET' : 'MISSING',
+        CALLBACK_URL: process.env.CALLBACK_URL ? 'SET' : 'MISSING'
+    });
 }
 
-module.exports = app; // Export for testing
+passport.use(new GitHubStrategy({
+    clientID: process.env.GITHUB_CLIENT_ID,
+    clientSecret: process.env.GITHUB_CLIENT_SECRET,
+    callbackURL: process.env.CALLBACK_URL
+},
+function(accessToken, refreshToken, profile, done) {
+    // User.findOrCreate({ githubId: profile.id }, function (err, user) {
+    return done(null, profile);
+    // });
+}));
+
+passport.serializeUser((user, done) => {
+    done(null, user);
+});
+
+passport.deserializeUser((user, done) => {
+    done(null, user);
+});
+
+// Swagger UI setup
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+
+// Authentication Routes
+app.get('/', (req, res) => { 
+    res.send(req.session.user !== undefined ? `Logged in as ${req.session.user.displayName}` : "Logged Out");
+});
+
+app.get('/github', passport.authenticate('github', { scope: ['user:email'] }));
+
+app.get('/github/callback', passport.authenticate('github', {
+    failureRedirect: '/api-docs', session: false }),
+    (req, res) => {
+        req.session.user = req.user;
+        res.redirect('/');
+    }
+);
+
+app.get('/logout', (req, res) => {
+    req.logout((err) => {
+        if (err) { return next(err); }
+        res.redirect('/');
+    });
+});
+
+app.use("/", require("./routes/index.js"));
+
+
+
+
+mongodb.initDb((err) => {
+    if (err) {
+        console.log(err);
+    } else {
+        app.listen(PORT, () => {console.log(`Database is listening and node is running on port ${PORT}`);});
+    }
+});
+
